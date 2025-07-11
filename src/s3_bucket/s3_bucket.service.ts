@@ -1,5 +1,6 @@
 import { Injectable, Req, Res, Logger } from '@nestjs/common';
-import * as AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -8,7 +9,7 @@ dotenv.config();
 export class S3BucketService {
   private readonly logger = new Logger(S3BucketService.name);
   private readonly AWS_S3_BUCKET = process.env.AWS_S3_BUCKET;
-  private readonly s3: AWS.S3;
+  private readonly s3: S3Client;
 
   constructor() {
     if (
@@ -19,10 +20,12 @@ export class S3BucketService {
       throw new Error('AWS credentials are not properly configured');
     }
 
-    this.s3 = new AWS.S3({
+    this.s3 = new S3Client({
       region: process.env.AWS_REGION,
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
     });
   }
 
@@ -45,13 +48,10 @@ export class S3BucketService {
       Body: file,
       ContentType: mimetype,
       ContentDisposition: 'inline',
-      CreateBucketConfiguration: {
-        LocationConstraint: process.env.AWS_REGION,
-      },
     };
-
     try {
-      let s3Response = await this.s3.upload(params).promise();
+      const command = new PutObjectCommand(params);
+      const s3Response = await this.s3.send(command);
       this.logger.log('Uploaded file successfully to s3 bucket!! ');
       return s3Response;
     } catch (e) {
@@ -61,35 +61,27 @@ export class S3BucketService {
 
   async listObject(): Promise<any> {
     this.logger.log('Listing objects in S3 bucket');
-
     if (!this.AWS_S3_BUCKET) {
-      throw new Error(
-        'AWS_S3_BUCKET is not defined in the environment variables',
-      );
+      throw new Error('AWS_S3_BUCKET is not defined in the environment variables');
     }
-
-    var params = {
+    const params = {
       Bucket: this.AWS_S3_BUCKET,
       Delimiter: '/',
     };
-
-    let result = await this.s3.listObjectsV2(params).promise();
-
-    console.log('List object: ' + result);
+    const command = new ListObjectsV2Command(params);
+    const result = await this.s3.send(command);
+    console.log('List object: ' + JSON.stringify(result));
     return result;
   }
 
   async downloadFile() {
     this.logger.log('Downloading file from S3 bucket ');
-
-    var params = {
+    const params = {
       Bucket: this.AWS_S3_BUCKET,
-      Key: 'Profile_Picture.jpg',
-      Expires: 36000,
+      Key: 'example-file.txt',
     };
-
-    const url = await this.s3.getSignedUrl('getObject', params);
-
+    const command = new GetObjectCommand(params);
+    const url = await getSignedUrl(this.s3, command, { expiresIn: 36000 });
     console.log('Url to download file: ' + url);
     return url;
   }
@@ -98,17 +90,13 @@ export class S3BucketService {
     if (!this.AWS_S3_BUCKET) {
       throw new Error('AWS_S3_BUCKET is not defined');
     }
-
-    const params: AWS.S3.GetObjectRequest = {
+    const params = {
       Bucket: this.AWS_S3_BUCKET,
       Key: key,
     };
-
+    const command = new GetObjectCommand(params);
     try {
-      const url = await this.s3.getSignedUrlPromise('getObject', {
-        ...params,
-        Expires: expiresIn,
-      });
+      const url = await getSignedUrl(this.s3, command, { expiresIn });
       this.logger.log(`Generated download URL for ${key}`);
       return url;
     } catch (e) {
@@ -125,15 +113,14 @@ export class S3BucketService {
     if (!this.AWS_S3_BUCKET) {
       throw new Error('AWS_S3_BUCKET is not defined');
     }
-
-    const params: AWS.S3.PutObjectRequest = {
+    const params = {
       Bucket: this.AWS_S3_BUCKET,
       Key: key,
       ContentType: contentType,
     };
-
+    const command = new PutObjectCommand(params);
     try {
-      const url = await this.s3.getSignedUrlPromise('putObject', params);
+      const url = await getSignedUrl(this.s3, command, { expiresIn });
       this.logger.log(`Generated upload URL for ${key}`);
       return url;
     } catch (e) {
@@ -143,18 +130,16 @@ export class S3BucketService {
   }
   async deleteObject(key: string): Promise<any> {
     this.logger.log(`Deleting file: ${key}`);
-
     if (!this.AWS_S3_BUCKET) {
       throw new Error('AWS_S3_BUCKET is not defined');
     }
-
     const params = {
       Bucket: this.AWS_S3_BUCKET,
       Key: key,
     };
-
+    const command = new DeleteObjectCommand(params);
     try {
-      const response = await this.s3.deleteObject(params).promise();
+      const response = await this.s3.send(command);
       this.logger.log(`Deleted file ${key} successfully`);
       return response;
     } catch (e) {

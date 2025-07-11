@@ -6,6 +6,7 @@ import {
   Logger,
   Get,
   Query,
+  Delete,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3BucketService } from './s3_bucket.service';
@@ -67,14 +68,11 @@ export class S3BucketController {
     return responseData;
    }
    
-  @Get('delete')
+  @Delete('delete')
   async deleteObject(@Query('key') key  : string): Promise<any> {
     this.logger.log(`Deleting file: ${key}`);
     const responseData = await this.S3BucketService.deleteObject(key);
     this.logger.log('Response Data ' + responseData);
     return responseData;
   }
-
-
-
 }
